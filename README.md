@@ -1,26 +1,78 @@
 # Sentinel
 
-**SMS-native incident command agent for engineering teams.**
+**Sentinel remembers so your team doesn't have to.**
 
-Built with Photon · HydraDB · GMI Cloud · PixVerse
+SMS-native incident command agent for engineering teams.
+
+Built with **Photon** · **HydraDB** · **GMI Cloud** · **PixVerse**
+
+---
+
+## 🎬 Demo Video
+
+[Watch the full demo](https://drive.google.com/file/d/1EYYmyACnN4U0aIr5kLIDhAXuoUpqgq86/view?usp=sharing)
+
+---
+
+## Description
+
+Sentinel is an SMS-native incident command agent for engineering teams. When production breaks, Sentinel pages your on-call engineer through **Photon** over iMessage, queries **HydraDB** to recall similar past incidents and stored mitigations, uses **GMI Cloud** to reason through triage and rank hypotheses, and generates a live executive recap video with **PixVerse** — all without leaving SMS. The more incidents it handles, the smarter it gets.
 
 ---
 
 ## 60-Second Pitch
 
-Sentinel is an SMS-native incident command agent for engineering teams. Most tools only page you when production breaks. Sentinel remembers with you. It uses Photon as the conversation layer, HydraDB as incident memory, GMI Cloud for reasoning and agent orchestration, and PixVerse to generate a real executive recap video from the incident timeline. The engineer can triage, recall past mitigations, generate stakeholder updates, and create a video recap without leaving SMS.
+Most tools only page you when production breaks. Sentinel remembers with you. It uses Photon as the conversation layer, HydraDB as incident memory, GMI Cloud for reasoning and agent orchestration, and PixVerse to generate a real executive recap video from the incident timeline. The engineer can triage, recall past mitigations, generate stakeholder updates, and create a video recap — without leaving SMS.
 
 ---
 
 ## Stack
 
-| Layer | Sponsor |
+| Layer | Technology |
 |---|---|
-| SMS conversation | Photon |
+| SMS / iMessage | Photon (Spectrum SDK) |
 | Incident memory | HydraDB |
-| LLM reasoning | GMI Cloud |
-| Executive video | PixVerse |
-| Backend | FastAPI + httpx |
+| LLM reasoning + intent | GMI Cloud (`anthropic/claude-haiku-4.5`) |
+| Video generation | PixVerse via GMI Cloud (`pixverse-v5.6-transition`) |
+| Architecture diagrams | Mermaid + Kroki.io |
+| Backend | FastAPI + Python 3.11 |
+| Package manager | uv |
+| Photon bridge | Node.js + Spectrum SDK |
+
+---
+
+## Architecture
+
+```
+Engineer Phone (iMessage)
+        │
+        ▼
+  Photon (Spectrum)
+        │  bridge.js forwards inbound
+        ▼
+  POST /sms/inbound
+        │
+        ▼
+  agent.dispatch_inbound()
+  (LLM intent detection via GMI Cloud)
+        │
+   ┌────┴────────────────┐
+   ▼                     ▼
+HydraDB              GMI Cloud
+(recall / store)     (triage / recap)
+   │                     │
+   └────────┬────────────┘
+            ▼
+    Mermaid → Kroki.io
+    (error + resolved diagrams)
+            │
+            ▼
+       PixVerse (via GMI Cloud)
+    (transition: red → green)
+            │
+            ▼
+  Photon → video URL to engineer
+```
 
 ---
 
@@ -32,11 +84,10 @@ Sentinel is an SMS-native incident command agent for engineering teams. Most too
 git clone <repo>
 cd matcha-hackthon
 
-# Install uv (if not already installed)
+# Install uv
 curl -LsSf https://astral.sh/uv/install.sh | sh
-source $HOME/.local/bin/env  # or restart shell
+source $HOME/.local/bin/env
 
-# Install all dependencies into a managed .venv
 uv sync
 ```
 
@@ -44,83 +95,109 @@ uv sync
 
 ```bash
 cp .env.example .env
+# Fill in your credentials
 ```
 
-Open `.env` and fill in:
-
-| Variable | Source |
+| Variable | Description |
 |---|---|
-| `GMI_API_KEY` | GMI Cloud dashboard — JWT bearer token |
-| `GMI_MODEL` | GMI Cloud dashboard — confirm available model IDs |
-| `HYDRADB_API_KEY` | HydraDB sponsor credentials |
-| `HYDRADB_PROJECT_ID` | HydraDB project ID |
+| `GMI_API_KEY` | GMI Cloud inference JWT (scope: ie_model) |
+| `GMI_INFRA_API_KEY` | GMI Cloud infra JWT (scope: ce_resource) — for PixVerse |
+| `GMI_MODEL` | e.g. `anthropic/claude-haiku-4.5` |
+| `HYDRADB_API_KEY` | HydraDB API key (`sk_live_...`) |
+| `HYDRADB_PROJECT_ID` | HydraDB project UUID |
 | `HYDRADB_SECRET_KEY` | HydraDB secret key |
-| `PIXVERSE_API_KEY` | PixVerse API token (may match GMI token — confirm with sponsor) |
-| `PHOTON_API_KEY` | Photon sponsor dashboard |
-| `PHOTON_FROM_NUMBER` | Photon sender number (E.164) |
-| `ON_CALL_PHONE` | Your real phone number for SMS demo (E.164) |
+| `PROJECT_ID` | Photon Spectrum project ID |
+| `PROJECT_SECRET` | Photon Spectrum project secret |
+| `ON_CALL_PHONE` | Engineer's phone number (E.164, e.g. `+12135739107`) |
 
-> **TODOs to confirm with sponsors at the booth:**
-> - GMI Cloud: exact base URL and available model names
-> - HydraDB: exact base URL, auth header name, endpoint paths
-> - PixVerse: whether it uses the GMI JWT or a separate token; exact endpoint paths
-> - Photon: base URL, auth header, webhook payload field names
+### 3. Start the servers
 
-### 3. Start the server
-
+**Terminal 1 — FastAPI backend**
 ```bash
-uv run uvicorn app.main:app --reload --port 8000
+uv run uvicorn app.main:app --reload --port 8001
 ```
 
-### 4. Expose localhost with ngrok
-
+**Terminal 2 — Photon bridge**
 ```bash
-ngrok http 8000
-```
-
-Copy the HTTPS URL (e.g. `https://abc123.ngrok.io`).
-
-### 5. Configure Photon webhook
-
-In the Photon dashboard, set the inbound webhook URL to:
-
-```
-https://abc123.ngrok.io/sms/inbound
-```
-
-> TODO: Confirm the exact field name and format in the Photon dashboard.
-
----
-
-## Seeding HydraDB
-
-Run this once before the demo to load prior incident memories:
-
-```bash
-curl -s -X POST http://localhost:8000/seed-memory | jq .
-```
-
-Expected output:
-```json
-{
-  "seeded": 5,
-  "total": 5,
-  "results": [...]
-}
+cd photon-bridge
+PROJECT_ID=<your_project_id> PROJECT_SECRET=<your_project_secret> node bridge.js
 ```
 
 ---
 
-## Triggering the Demo Alert
+## Demo
+
+### Before every demo — reset + seed
 
 ```bash
-# Use ON_CALL_PHONE from .env
-curl -s -X POST http://localhost:8000/fake-alert | jq .
+# Seed HydraDB (first time only)
+curl -s -X POST http://localhost:8001/seed-memory | python3 -m json.tool
 
-# Override phone number
-curl -s -X POST http://localhost:8000/fake-alert \
-  -H "Content-Type: application/json" \
-  -d '{"phone": "+15555550100"}' | jq .
+# Reset K8s demo session (clean slate)
+curl -s -X POST http://localhost:8001/reset-k8s-demo | python3 -m json.tool
+
+# Text START from your phone to the Photon iMessage number
+# Wait for: "Sentinel is ready. Waiting for the alert."
+```
+
+---
+
+### Round 1 — K8s incident, no prior memory
+
+```bash
+curl -s -X POST http://localhost:8001/fakeerror1 | python3 -m json.tool
+```
+
+Phone receives:
+```
+🚨 K8s ALERT | payment-service | production
+Pod: payment-svc-7d8f9b-xkp2j
+Status: CrashLoopBackOff (restarts: 8)
+Exit Code: 137 (OOMKilled)
+Memory: 498Mi / 512Mi limit
+```
+
+Reply flow:
+1. `triage this`
+2. `checked logs, found OOMKilled exit 137, increased memory limit from 512Mi to 1Gi, redeployed payment-svc`
+3. `generate video`
+
+Sentinel stores the triage steps to HydraDB. PixVerse generates a before/after architecture diagram video automatically.
+
+---
+
+### Round 2 — same error, memory found, auto-resolution
+
+```bash
+curl -s -X POST http://localhost:8001/fakeerror2 | python3 -m json.tool
+```
+
+Reply flow:
+1. `triage`
+2. `yes apply it`
+
+Sentinel finds the stored steps in HydraDB, suggests the fix automatically, and generates the video.
+
+---
+
+### Original checkout-api demo
+
+```bash
+curl -s -X POST http://localhost:8001/fake-alert | python3 -m json.tool
+```
+
+Reply flow:
+1. `TRIAGE`
+2. `what did we do last time?`
+3. `mitigated, generate exec recap video`
+4. `save: add Redis saturation check before checkout deploys`
+
+---
+
+### Show judges the incident state
+
+```bash
+curl -s http://localhost:8001/incidents | python3 -m json.tool
 ```
 
 ---
@@ -129,172 +206,33 @@ curl -s -X POST http://localhost:8000/fake-alert \
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/health` | Health check + config |
-| `POST` | `/seed-memory` | Seed HydraDB demo memories |
-| `POST` | `/fake-alert` | Trigger P1 alert via Photon |
+| `GET` | `/health` | Health check |
+| `POST` | `/seed-memory` | Seed HydraDB with demo memories |
+| `POST` | `/reset-k8s-demo` | Reset K8s demo session (clean HydraDB namespace) |
+| `POST` | `/fake-alert` | Trigger checkout-api P1 alert |
+| `POST` | `/fakeerror1` | Trigger K8s OOMKilled alert (no prior memory) |
+| `POST` | `/fakeerror2` | Trigger K8s OOMKilled alert (memory exists) |
 | `POST` | `/sms/inbound` | Photon inbound webhook |
-| `POST` | `/pixverse/webhook` | PixVerse completion webhook |
-| `GET` | `/pixverse/status/{job_id}` | Poll PixVerse job status |
-| `GET` | `/incident/{incident_id}` | Get full incident state (JSON) |
-| `GET` | `/incidents` | List all active incidents |
+| `GET` | `/incident/{id}` | Get full incident state |
+| `GET` | `/incidents` | List all incidents |
+| `GET` | `/pixverse/status/{job_id}` | Poll PixVerse job |
 
 ---
 
-## Demo Script (2-Minute Judge Demo)
+## How the Video Works
 
-### Step 0 — Prep (before judges arrive)
-```bash
-# Terminal 1: FastAPI backend
-uv run uvicorn app.main:app --reload --port 8001
-
-# Terminal 2: Photon bridge
-cd photon-bridge
-PROJECT_ID=e712449d-e8cc-4637-9293-77924f869f80 \
-PROJECT_SECRET=Jq8SJjiQeDl92ZKuvr59SYS_ngXR1Bl5HbJdSRtrQs0 \
-node bridge.js
-
-# Seed HydraDB
-curl -s -X POST http://localhost:8001/seed-memory | jq .
-```
-
-**One-time space warm-up — engineer texts the Photon iMessage number:**
-```
-START
-```
-Bridge replies: "Sentinel is ready." — this seeds the space cache so outbound SMS works.
-
----
-
-### Step 1 — Trigger the alert
-```bash
-curl -s -X POST http://localhost:8000/fake-alert | jq .
-```
-
-**SMS received on your phone:**
-```
-🚨 P1: checkout-api 500s spiking.
-Current error rate: 18%.
-Recent deploy: checkout-api v2.8.1, 8 min ago.
-Reply TRIAGE to start.
-```
-
----
-
-### Step 2 — Reply: `TRIAGE`
-
-Sentinel queries HydraDB, calls GMI Cloud, replies:
-
-```
-Top hypotheses from incident memory:
-
-1. Redis connection pool exhaustion — Matches prior incident #214
-2. Bad checkout-api v2.8.1 deploy — Recent deploy 8 minutes ago
-3. Payment provider timeout — Possible dependency issue
-
-Most likely: #1 because Redis latency and connection timeout errors match March.
-Ask: "What did we do last time?" to recall the previous mitigation.
-```
-
----
-
-### Step 3 — Reply: `What did we do last time?`
-
-```
-Incident #214 mitigation:
-- rollback canary from 50% to 10%
-- increase Redis max connections from 100 → 300
-- restart checkout-api workers
-- monitor checkout_5xx_rate for 10 min
-
-Suggested first action: rollback canary to 10%.
-```
-
----
-
-### Step 4 — Reply: `Mitigated. Generate exec recap video.`
-
-Immediate SMS:
-```
-Mitigation recorded.
-
-Exec recap:
-Checkout errors spiked after the v2.8.1 deploy. Sentinel matched the pattern
-to March incident #214: Redis connection pool exhaustion. Canary traffic was
-reduced and checkout stabilized. Follow-up: add Redis saturation checks before
-checkout deploys.
-
-Generating live PixVerse video now...
-```
-
-Then PixVerse job SMS:
-```
-PixVerse job started: 7382910
-Reply VIDEO STATUS to check progress.
-```
-
----
-
-### Step 5 — Reply: `VIDEO STATUS`
-
-```
-PixVerse status: processing. Job ID: 7382910.
-```
-
-*(When complete, auto-delivers:)*
-```
-Exec recap video ready:
-https://cdn.pixverse.ai/videos/7382910.mp4
-```
-
----
-
-### Step 6 — Reply: `Save follow-up: add Redis saturation check before checkout deploys`
-
-```
-Saved. Future checkout-api deploy incidents will check Redis saturation
-before rollback recommendations.
-```
-
----
-
-### Show judges the incident state
-```bash
-curl -s http://localhost:8000/incidents | jq '.[0]'
-```
-
----
-
-## Architecture
-
-```
-Phone (SMS)
-    │
-    ▼
-Photon ──► POST /sms/inbound
-                │
-                ▼
-          agent.dispatch_inbound()
-                │
-         ┌──────┴──────┐
-         ▼             ▼
-    HydraDB         GMI Cloud
-  (recall memory)  (reason + generate)
-         │             │
-         └──────┬──────┘
-                ▼
-           PixVerse
-        (video generation)
-                │
-                ▼
-        Photon (reply SMS)
-```
+1. GMI generates Mermaid diagram code for the **error state** (red pod, CrashLoopBackOff)
+2. GMI generates Mermaid diagram code for the **resolved state** (green pod, Running)
+3. Both are rendered to PNG via **Kroki.io**
+4. **PixVerse transition model** animates between the two diagrams
+5. Video URL is sent to the engineer's phone via Photon when ready
 
 ---
 
 ## Error Handling
 
 - **GMI fails** → SMS: "Sentinel reasoning failed. Please triage manually."
-- **PixVerse slow** → Sends real job ID; SMS when polled or when webhook fires.
-- **PixVerse fails** → SMS with actual failure status; incident recap text preserved.
+- **PixVerse slow** → Background polling every 15s, video URL sent automatically when ready.
+- **PixVerse fails** → SMS with failure status; incident recap text preserved.
 - **HydraDB unreachable** → Falls back to baked-in INC-214 knowledge; logs warning.
-- **No active incident for phone** → SMS: "No active incident found."
+- **No space cached in Photon bridge** → Text START to the Photon number first.
