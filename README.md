@@ -1,5 +1,7 @@
 # Sentinel
 
+Contributors - Chinmay Gabel & Sanmati Rajiv Sawalwade
+
 **Sentinel remembers so your team doesn't have to.**
 
 SMS-native incident command agent for engineering teams.
